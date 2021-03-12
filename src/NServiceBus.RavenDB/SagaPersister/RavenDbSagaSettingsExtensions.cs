@@ -2,20 +2,17 @@
 {
     using System;
     using NServiceBus.Configuration.AdvancedExtensibility;
-    using NServiceBus.ObjectBuilder;
     using NServiceBus.Persistence.RavenDB;
     using NServiceBus.Settings;
     using Raven.Client.Documents;
 
     /// <summary>
-    ///     Provides configuration options
+    /// Provides configuration options
     /// </summary>
     public static class RavenDbSagaSettingsExtensions
     {
-        internal const string AllowStaleSagaReadsKey = "RavenDB.AllowStaleSagaReads";
-
         /// <summary>
-        ///     Configures the given document store to be used when storing sagas
+        /// Configures the given document store to be used when storing sagas
         /// </summary>
         /// <param name="cfg">Object to attach to</param>
         /// <param name="documentStore">The document store to be used</param>
@@ -26,7 +23,7 @@
         }
 
         /// <summary>
-        ///     Configures the given document store to be used when storing sagas
+        /// Configures the given document store to be used when storing sagas
         /// </summary>
         /// <param name="cfg">Object to attach to</param>
         /// <param name="storeCreator">A Func that will create the document store on NServiceBus initialization.</param>
@@ -37,14 +34,16 @@
         }
 
         /// <summary>
-        ///     Configures the given document store to be used when storing sagas
+        /// Configures the given document store to be used when storing sagas
         /// </summary>
         /// <param name="cfg">Object to attach to</param>
         /// <param name="storeCreator">A Func that will create the document store on NServiceBus initialization.</param>
-        public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForSagas(this PersistenceExtensions<RavenDBPersistence> cfg, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForSagas(this PersistenceExtensions<RavenDBPersistence> cfg, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
         {
             DocumentStoreManager.SetDocumentStore<StorageType.Sagas>(cfg.GetSettings(), storeCreator);
             return cfg;
         }
+
+        internal const string AllowStaleSagaReadsKey = "RavenDB.AllowStaleSagaReads";
     }
 }

@@ -1,16 +1,29 @@
 ﻿namespace NServiceBus.Persistence.RavenDB
 {
     using System.Threading.Tasks;
-    using NServiceBus.Extensibility;
-    using NServiceBus.Persistence;
+    using Extensibility;
+    using Transport;
 
     class RavenDBSynchronizedStorage : ISynchronizedStorage
     {
-        public Task<CompletableSynchronizedStorageSession> OpenSession(ContextBag contextBag)
+        public RavenDBSynchronizedStorage(IOpenTenantAwareRavenSessions sessionCreator, CurrentSessionHolder sessionHolder)
         {
-            var session = contextBag.GetAsyncSession();
-            var synchronizedStorageSession = new RavenDBSynchronizedStorageSession(session);
+            this.sessionCreator = sessionCreator;
+            this.sessionHolder = sessionHolder;
+        }
+
+        public Task<CompletableSynchronizedStorageSession> OpenSession(ContextBag context)
+        {
+            var message = context.Get<IncomingMessage>();
+            var session = sessionCreator.OpenSession(message.Headers);
+            var synchronizedStorageSession = new RavenDBSynchronizedStorageSession(session, context, true);
+
+            sessionHolder?.SetCurrentSession(session);
+
             return Task.FromResult((CompletableSynchronizedStorageSession)synchronizedStorageSession);
         }
+
+        IOpenTenantAwareRavenSessions sessionCreator;
+        readonly CurrentSessionHolder sessionHolder;
     }
 }

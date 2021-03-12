@@ -23,8 +23,9 @@ public class ConfigureEndpointRavenDBPersistence : IConfigureEndpointTestExecuti
 
         var persistenceExtensions = configuration.UsePersistence<RavenDBPersistence>()
             .DoNotCacheSubscriptions()
-            .DoNotSetupDatabasePermissions()
             .SetDefaultDocumentStore(documentStore);
+
+        persistenceExtensions.Sagas().UseOptimisticLocking();
 
         configuration.GetSettings().Set(DefaultPersistenceExtensionsKey, persistenceExtensions);
 
@@ -51,11 +52,7 @@ public class ConfigureEndpointRavenDBPersistence : IConfigureEndpointTestExecuti
 
     internal static DocumentStore GetInitializedDocumentStore(string defaultDatabase)
     {
-        var urls = Environment.GetEnvironmentVariable("CommaSeparatedRavenClusterUrls");
-        if (urls == null)
-        {
-            throw new Exception("RavenDB cluster URLs must be specified in an environment variable named CommaSeparatedRavenClusterUrls.");
-        }
+        var urls = Environment.GetEnvironmentVariable("CommaSeparatedRavenClusterUrls") ?? "http://localhost:8080";
 
         var documentStore = new DocumentStore
         {

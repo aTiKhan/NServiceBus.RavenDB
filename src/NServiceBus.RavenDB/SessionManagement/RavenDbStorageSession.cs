@@ -2,41 +2,56 @@
 {
     using System;
     using System.Collections.Generic;
-    using NServiceBus.Features;
+    using Features;
+    using Microsoft.Extensions.DependencyInjection;
     using Raven.Client.Documents.Session;
 
     class RavenDbStorageSession : Feature
     {
         protected override void Setup(FeatureConfigurationContext context)
         {
-            context.Container.ConfigureComponent<RavenDBSynchronizedStorageAdapter>(DependencyLifecycle.SingleInstance);
-            context.Container.ConfigureComponent<RavenDBSynchronizedStorage>(DependencyLifecycle.SingleInstance);
-
             // Check to see if the user provided us with a shared session to work with before we go and create our own to inject into the pipeline
-            var getAsyncSessionFunc = context.Settings.GetOrDefault<Func<IDictionary<string, string>, IAsyncDocumentSession>>(RavenDbSettingsExtensions.SharedAsyncSessionSettingsKey);
-
+            var getAsyncSessionFunc = context.Settings.GetOrDefault<Func<IDictionary<string, string>, IAsyncDocumentSession>>(SharedAsyncSession);
             if (getAsyncSessionFunc != null)
             {
-                IOpenRavenSessionsInPipeline sessionCreator = new OpenRavenSessionByCustomDelegate(getAsyncSessionFunc);
-                context.Container.RegisterSingleton(sessionCreator);
+                IOpenTenantAwareRavenSessions sessionCreator = new OpenRavenSessionByCustomDelegate(getAsyncSessionFunc);
+                context.Services.AddSingleton(sessionCreator);
+
+                context.Settings.AddStartupDiagnosticsSection(
+                    StartupDiagnosticsSectionName,
+                    new
+                    {
+                        HasSharedAsyncSession = true,
+                    });
             }
             else
             {
-                context.Container.ConfigureComponent<IOpenRavenSessionsInPipeline>(b =>
+                context.Services.AddSingleton<IOpenTenantAwareRavenSessions>(sp =>
                 {
-                    var store = DocumentStoreManager.GetDocumentStore<StorageType.Sagas>(context.Settings, b);
+                    var store = DocumentStoreManager.GetDocumentStore<StorageType.Sagas>(context.Settings, sp);
                     var storeWrapper = new DocumentStoreWrapper(store);
-
-                    var dbNameConvention = context.Settings.GetOrDefault<Func<IDictionary<string, string>, string>>("RavenDB.SetMessageToDatabaseMappingConvention");
+                    var dbNameConvention = context.Settings.GetOrDefault<Func<IDictionary<string, string>, string>>(MessageToDatabaseMappingConvention);
                     return new OpenRavenSessionByDatabaseName(storeWrapper, dbNameConvention);
-                }, DependencyLifecycle.SingleInstance);
+                });
+
+                context.Settings.AddStartupDiagnosticsSection(
+                    StartupDiagnosticsSectionName,
+                    new
+                    {
+                        HasSharedAsyncSession = false,
+                        HasMessageToDatabaseMappingConvention = context.Settings.HasSetting(MessageToDatabaseMappingConvention),
+                    });
             }
 
-            context.Pipeline.Register("OpenRavenDbAsyncSession", b =>
-            {
-                var sessionCreator = b.Build<IOpenRavenSessionsInPipeline>();
-                return new OpenAsyncSessionBehavior(sessionCreator);
-            }, "Makes sure that there is a RavenDB IAsyncDocumentSession available on the pipeline");
+            var sessionHolder = new CurrentSessionHolder();
+            context.Services.AddScoped(_ => sessionHolder.Current);
+            context.Pipeline.Register(new CurrentSessionBehavior(sessionHolder), "Manages the lifecycle of the current session holder.");
+            context.Services.AddSingleton<ISynchronizedStorage, RavenDBSynchronizedStorage>(provider => new RavenDBSynchronizedStorage(provider.GetService<IOpenTenantAwareRavenSessions>(), sessionHolder));
+            context.Services.AddSingleton<ISynchronizedStorageAdapter>(new RavenDBSynchronizedStorageAdapter(sessionHolder));
         }
+
+        internal const string SharedAsyncSession = "RavenDbSharedAsyncSession";
+        internal const string MessageToDatabaseMappingConvention = "RavenDB.SetMessageToDatabaseMappingConvention";
+        const string StartupDiagnosticsSectionName = "NServiceBus.Persistence.RavenDB.StorageSession";
     }
 }

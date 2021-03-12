@@ -22,7 +22,8 @@ namespace NServiceBus.Persistence.RavenDB
             documentStore = store;
         }
 
-        public TimeSpan AggressiveCacheDuration { get; set; } = TimeSpan.FromMinutes(1);
+        public TimeSpan AggressiveCacheDuration { get; set; }
+
         public bool DisableAggressiveCaching { get; set; }
 
         public async Task Subscribe(Subscriber subscriber, MessageType messageType, ContextBag context)
@@ -55,6 +56,7 @@ namespace NServiceBus.Persistence.RavenDB
                             };
 
                             await session.StoreAsync(subscription).ConfigureAwait(false);
+                            session.StoreSchemaVersionInMetadata(subscription);
                         }
 
                         if (!subscription.Subscribers.Contains(subscriptionClient))
@@ -79,7 +81,8 @@ namespace NServiceBus.Persistence.RavenDB
                 {
                     attempts++;
                 }
-            } while (attempts < 5);
+            }
+            while (attempts < 5);
         }
 
         public async Task Unsubscribe(Subscriber subscriber, MessageType messageType, ContextBag context)
@@ -132,7 +135,7 @@ namespace NServiceBus.Persistence.RavenDB
             }
         }
 
-        string GetDocumentIdForMessageType(MessageType messageType)
+        static string GetDocumentIdForMessageType(MessageType messageType)
         {
             using (var provider = new SHA1CryptoServiceProvider())
             {
@@ -155,15 +158,21 @@ namespace NServiceBus.Persistence.RavenDB
 
         IDisposable ConfigureAggressiveCaching(IAsyncDocumentSession session)
         {
-            if (DisableAggressiveCaching)
-            {
-                return EmptyDisposable.Instance;
-            }
-
-            return session.Advanced.DocumentStore.AggressivelyCacheFor(AggressiveCacheDuration);
+            return DisableAggressiveCaching
+                ? EmptyDisposable.Instance
+                : session.Advanced.DocumentStore.AggressivelyCacheFor(AggressiveCacheDuration);
         }
 
-        class EmptyDisposable : IDisposable
+        IAsyncDocumentSession OpenAsyncSession()
+        {
+            var session = documentStore.OpenAsyncSession();
+            session.Advanced.UseOptimisticConcurrency = true;
+            return session;
+        }
+
+        IDocumentStore documentStore;
+
+        sealed class EmptyDisposable : IDisposable
         {
             EmptyDisposable()
             {
@@ -175,14 +184,5 @@ namespace NServiceBus.Persistence.RavenDB
 
             public static readonly EmptyDisposable Instance = new EmptyDisposable();
         }
-
-        IAsyncDocumentSession OpenAsyncSession()
-        {
-            var session = documentStore.OpenAsyncSession();
-            session.Advanced.UseOptimisticConcurrency = true;
-            return session;
-        }
-
-        IDocumentStore documentStore;
     }
 }

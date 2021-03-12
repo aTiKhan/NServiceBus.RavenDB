@@ -3,60 +3,65 @@
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using Microsoft.Extensions.DependencyInjection;
     using NServiceBus.Features;
     using NServiceBus.Logging;
-    using NServiceBus.Settings;
+    using NServiceBus.Outbox;
 
     class RavenDbOutboxStorage : Feature
     {
         public RavenDbOutboxStorage()
         {
+            Defaults(s => s.EnableFeatureByDefault<RavenDbStorageSession>());
             DependsOn<Outbox>();
         }
 
         protected override void Setup(FeatureConfigurationContext context)
         {
-            var endpointName = context.Settings.EndpointName();
-
             DocumentStoreManager.GetUninitializedDocumentStore<StorageType.Outbox>(context.Settings)
                 .CreateIndexOnInitialization(new OutboxRecordsIndex());
 
-            context.Container.ConfigureComponent(b =>
+            var timeToKeepDeduplicationData = context.Settings.GetOrDefault<TimeSpan?>(TimeToKeepDeduplicationData) ?? DeduplicationDataTTLDefault;
+
+            context.Services.AddTransient<IOutboxStorage>(
+                sp => new OutboxPersister(context.Settings.EndpointName(), sp.GetRequiredService<IOpenTenantAwareRavenSessions>(), timeToKeepDeduplicationData));
+
+            var frequencyToRunDeduplicationDataCleanup = context.Settings.GetOrDefault<TimeSpan?>(FrequencyToRunDeduplicationDataCleanup) ?? TimeSpan.FromMinutes(1);
+
+            context.RegisterStartupTask(builder =>
             {
-                var store = DocumentStoreManager.GetDocumentStore<StorageType.Outbox>(context.Settings, b);
-                return new OutboxPersister(store, endpointName, b.Build<IOpenRavenSessionsInPipeline>());
-            }, DependencyLifecycle.InstancePerCall);
+                var store = DocumentStoreManager.GetDocumentStore<StorageType.Outbox>(context.Settings, builder);
+                return new OutboxCleaner(new OutboxRecordsCleaner(store), frequencyToRunDeduplicationDataCleanup, timeToKeepDeduplicationData);
+            });
 
-            context.Container.ConfigureComponent(b =>
-            {
-                var store = DocumentStoreManager.GetDocumentStore<StorageType.Outbox>(context.Settings, b);
-                return new OutboxRecordsCleaner(store);
-            }, DependencyLifecycle.InstancePerCall);
-
-            context.Container.ConfigureComponent<OutboxCleaner>(DependencyLifecycle.InstancePerCall);
-
-            context.RegisterStartupTask(builder => builder.Build<OutboxCleaner>());
+            context.Settings.AddStartupDiagnosticsSection(
+                "NServiceBus.Persistence.RavenDB.Outbox",
+                new
+                {
+                    FrequencyToRunDeduplicationDataCleanup = frequencyToRunDeduplicationDataCleanup,
+                    TimeToKeepDeduplicationData = timeToKeepDeduplicationData,
+                });
         }
+
+        internal const string TimeToKeepDeduplicationData = "Outbox.TimeToKeepDeduplicationData";
+        internal const string FrequencyToRunDeduplicationDataCleanup = "Outbox.FrequencyToRunDeduplicationDataCleanup";
+        internal static readonly TimeSpan DeduplicationDataTTLDefault = TimeSpan.FromDays(7);
 
         class OutboxCleaner : FeatureStartupTask
         {
-            public OutboxCleaner(OutboxRecordsCleaner cleaner, ReadOnlySettings settings)
+            public OutboxCleaner(OutboxRecordsCleaner cleaner, TimeSpan frequencyToRunDeduplicationDataCleanup, TimeSpan timeToKeepDeduplicationData)
             {
                 this.cleaner = cleaner;
-                this.settings = settings;
-                logger = LogManager.GetLogger<OutboxCleaner>();
+                this.frequencyToRunDeduplicationDataCleanup = frequencyToRunDeduplicationDataCleanup;
+                this.timeToKeepDeduplicationData = timeToKeepDeduplicationData;
             }
 
             protected override Task OnStart(IMessageSession session)
             {
-                frequencyToRunDeduplicationDataCleanup = settings.GetOrDefault<TimeSpan?>("Outbox.FrequencyToRunDeduplicationDataCleanup") ?? TimeSpan.FromMinutes(1);
-
                 if (frequencyToRunDeduplicationDataCleanup == Timeout.InfiniteTimeSpan)
                 {
                     return Task.CompletedTask;
                 }
-
-                timeToKeepDeduplicationData = settings.GetOrDefault<TimeSpan?>("Outbox.TimeToKeepDeduplicationData") ?? TimeSpan.FromDays(7);
 
                 cancellationTokenSource = new CancellationTokenSource();
                 cancellationToken = cancellationTokenSource.Token;
@@ -75,7 +80,6 @@
                     return;
                 }
 
-                // ReSharper disable once MethodSupportsCancellation
                 var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30));
                 var finishedTask = await Task.WhenAny(cleanupTask, timeoutTask).ConfigureAwait(false);
 
@@ -113,14 +117,14 @@
                 }
             }
 
+            readonly OutboxRecordsCleaner cleaner;
             Task cleanupTask;
-            OutboxRecordsCleaner cleaner;
-            ReadOnlySettings settings;
             TimeSpan timeToKeepDeduplicationData;
             TimeSpan frequencyToRunDeduplicationDataCleanup;
             CancellationTokenSource cancellationTokenSource;
             CancellationToken cancellationToken;
-            ILog logger;
+
+            static readonly ILog logger = LogManager.GetLogger<OutboxCleaner>();
         }
     }
 }

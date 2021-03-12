@@ -1,19 +1,16 @@
 namespace NServiceBus.RavenDB.Persistence.SubscriptionStorage
 {
-    using NServiceBus.Persistence.RavenDB;
-    using NServiceBus.Unicast.Subscriptions;
     using System.Collections.Generic;
     using Newtonsoft.Json;
+    using NServiceBus.Persistence.RavenDB;
+    using NServiceBus.Unicast.Subscriptions;
 
     class Subscription
     {
         public string Id { get; set; }
 
         [JsonConverter(typeof(MessageTypeConverter))]
-// ReSharper disable once UnusedAutoPropertyAccessor.Global
         public MessageType MessageType { get; set; }
-
-        List<SubscriptionClient> subscribers;
 
         public List<SubscriptionClient> Subscribers
         {
@@ -25,7 +22,15 @@ namespace NServiceBus.RavenDB.Persistence.SubscriptionStorage
                 }
                 return subscribers;
             }
-            set { subscribers = value; }
+
+            set
+            {
+                subscribers = value;
+            }
         }
+
+        List<SubscriptionClient> subscribers;
+
+        internal static readonly string SchemaVersion = "1.0.0";
     }
 }

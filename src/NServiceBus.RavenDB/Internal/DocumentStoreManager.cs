@@ -2,24 +2,18 @@
 {
     using System;
     using System.Collections.Generic;
-    using NServiceBus.ObjectBuilder;
     using NServiceBus.Settings;
     using Raven.Client.Documents;
 
     static class DocumentStoreManager
     {
-        const string defaultDocStoreSettingsKey = "RavenDbDocumentStore";
-        static Dictionary<Type, string> featureSettingsKeys;
-
         static DocumentStoreManager()
         {
             featureSettingsKeys = new Dictionary<Type, string>
             {
-                {typeof(StorageType.GatewayDeduplication), "RavenDbDocumentStore/GatewayDeduplication"},
                 {typeof(StorageType.Subscriptions), "RavenDbDocumentStore/Subscription"},
                 {typeof(StorageType.Outbox), "RavenDbDocumentStore/Outbox"},
                 {typeof(StorageType.Sagas), "RavenDbDocumentStore/Saga"},
-                {typeof(StorageType.Timeouts), "RavenDbDocumentStore/Timeouts"}
             };
         }
 
@@ -29,6 +23,7 @@
             {
                 throw new ArgumentNullException(nameof(documentStore));
             }
+
             SetDocumentStoreInternal(settings, typeof(TStorageType), (_, __) => documentStore);
         }
 
@@ -39,20 +34,22 @@
             {
                 throw new ArgumentNullException(nameof(storeCreator));
             }
+
             SetDocumentStoreInternal(settings, typeof(TStorageType), (s, _) => storeCreator(s));
         }
 
-        public static void SetDocumentStore<TStorageType>(SettingsHolder settings, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        public static void SetDocumentStore<TStorageType>(SettingsHolder settings, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
             where TStorageType : StorageType
         {
             if (storeCreator == null)
             {
                 throw new ArgumentNullException(nameof(storeCreator));
             }
+
             SetDocumentStoreInternal(settings, typeof(TStorageType), storeCreator);
         }
 
-        static void SetDocumentStoreInternal(SettingsHolder settings, Type storageType, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        static void SetDocumentStoreInternal(SettingsHolder settings, Type storageType, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
         {
             var initContext = new DocumentStoreInitializer(storeCreator);
             settings.Set(featureSettingsKeys[storageType], initContext);
@@ -64,6 +61,7 @@
             {
                 throw new ArgumentNullException(nameof(documentStore));
             }
+
             SetDefaultStoreInternal(settings, (_, __) => documentStore);
         }
 
@@ -73,25 +71,27 @@
             {
                 throw new ArgumentNullException(nameof(storeCreator));
             }
+
             SetDefaultStoreInternal(settings, (s, _) => storeCreator(s));
         }
 
-        public static void SetDefaultStore(SettingsHolder settings, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        public static void SetDefaultStore(SettingsHolder settings, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
         {
             if (storeCreator == null)
             {
                 throw new ArgumentNullException(nameof(storeCreator));
             }
+
             SetDefaultStoreInternal(settings, storeCreator);
         }
 
-        static void SetDefaultStoreInternal(SettingsHolder settings, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        static void SetDefaultStoreInternal(SettingsHolder settings, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
         {
             var initContext = new DocumentStoreInitializer(storeCreator);
             settings.Set(defaultDocStoreSettingsKey, initContext);
         }
 
-        public static IDocumentStore GetDocumentStore<TStorageType>(ReadOnlySettings settings, IBuilder builder)
+        public static IDocumentStore GetDocumentStore<TStorageType>(ReadOnlySettings settings, IServiceProvider builder)
             where TStorageType : StorageType
         {
             return GetUninitializedDocumentStore<TStorageType>(settings).Init(settings, builder);
@@ -116,5 +116,8 @@
 
             return docStoreInitializer;
         }
+
+        const string defaultDocStoreSettingsKey = "RavenDbDocumentStore";
+        static Dictionary<Type, string> featureSettingsKeys;
     }
 }

@@ -1,21 +1,18 @@
 ﻿namespace NServiceBus
 {
     using System;
-    using NServiceBus.Configuration.AdvancedExtensibility;
-    using NServiceBus.ObjectBuilder;
-    using NServiceBus.Persistence.RavenDB;
     using NServiceBus.Settings;
     using Raven.Client.Documents;
 
     /// <summary>
-    ///     Configuration settings specific to the timeout storage
+    /// Configuration settings specific to the timeout storage
     /// </summary>
     public static class RavenDbGatewayDeduplicationSettingsExtensions
     {
         /// <summary>
-        ///     Configures the given document store to be used when storing gateway deduplication data
+        /// Configures the given document store to be used when storing gateway deduplication data
         /// </summary>
-        /// <param name="cfg"></param>
+        /// <param name="cfg">The persistence configuration object</param>
         /// <param name="documentStore">The document store to use</param>
         [ObsoleteEx(
             Message = "RavenDB gateway persistence has been moved to the NServiceBus.Gateway.RavenDB dedicated package.",
@@ -23,14 +20,13 @@
             TreatAsErrorFromVersion = "7.0.0")]
         public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForGatewayDeduplication(this PersistenceExtensions<RavenDBPersistence> cfg, IDocumentStore documentStore)
         {
-            DocumentStoreManager.SetDocumentStore<StorageType.GatewayDeduplication>(cfg.GetSettings(), documentStore);
-            return cfg;
+            throw new NotImplementedException();
         }
 
         /// <summary>
-        ///     Configures the given document store to be used when storing gateway deduplication data
+        /// Configures the given document store to be used when storing gateway deduplication data
         /// </summary>
-        /// <param name="cfg"></param>
+        /// <param name="cfg">The persistence configuration object</param>
         /// <param name="storeCreator">A Func that will create the document store on NServiceBus initialization.</param>
         [ObsoleteEx(
             Message = "RavenDB gateway persistence has been moved to the NServiceBus.Gateway.RavenDB dedicated package.",
@@ -38,19 +34,21 @@
             TreatAsErrorFromVersion = "7.0.0")]
         public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForGatewayDeduplication(this PersistenceExtensions<RavenDBPersistence> cfg, Func<ReadOnlySettings, IDocumentStore> storeCreator)
         {
-            DocumentStoreManager.SetDocumentStore<StorageType.GatewayDeduplication>(cfg.GetSettings(), storeCreator);
-            return cfg;
+            throw new NotImplementedException();
         }
 
         /// <summary>
-        ///     Configures the given document store to be used when storing gateway deduplication data
+        /// Configures the given document store to be used when storing gateway deduplication data
         /// </summary>
-        /// <param name="cfg"></param>
+        /// <param name="cfg">The persistence configuration object</param>
         /// <param name="storeCreator">A Func that will create the document store on NServiceBus initialization.</param>
-        public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForGatewayDeduplication(this PersistenceExtensions<RavenDBPersistence> cfg, Func<ReadOnlySettings, IBuilder, IDocumentStore> storeCreator)
+        [ObsoleteEx(
+            Message = "RavenDB gateway persistence has been moved to the NServiceBus.Gateway.RavenDB dedicated package.",
+            RemoveInVersion = "8.0.0",
+            TreatAsErrorFromVersion = "7.0.0")]
+        public static PersistenceExtensions<RavenDBPersistence> UseDocumentStoreForGatewayDeduplication(this PersistenceExtensions<RavenDBPersistence> cfg, Func<ReadOnlySettings, IServiceProvider, IDocumentStore> storeCreator)
         {
-            DocumentStoreManager.SetDocumentStore<StorageType.GatewayDeduplication>(cfg.GetSettings(), storeCreator);
-            return cfg;
+            throw new NotImplementedException();
         }
     }
 }

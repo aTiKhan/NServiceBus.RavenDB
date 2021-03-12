@@ -1,22 +1,25 @@
 ﻿namespace NServiceBus.Persistence.RavenDB
 {
     using System;
+    using System.Threading;
     using System.Threading.Tasks;
     using NServiceBus.Extensibility;
     using NServiceBus.Outbox;
     using NServiceBus.RavenDB.Outbox;
     using NServiceBus.Transport;
-    using Raven.Client.Documents;
+    using Raven.Client;
+    using Raven.Client.Documents.Commands.Batches;
+    using Raven.Client.Documents.Operations;
     using Raven.Client.Documents.Session;
-    using TransportOperation = NServiceBus.Outbox.TransportOperation;
+    using TransportOperation = Outbox.TransportOperation;
 
     class OutboxPersister : IOutboxStorage
     {
-        public OutboxPersister(IDocumentStore documentStore, string endpointName, IOpenRavenSessionsInPipeline sessionCreator)
+        public OutboxPersister(string endpointName, IOpenTenantAwareRavenSessions sessionCreator, TimeSpan timeToKeepDeduplicationData)
         {
-            this.documentStore = documentStore;
             this.endpointName = endpointName;
             this.sessionCreator = sessionCreator;
+            this.timeToKeepDeduplicationData = timeToKeepDeduplicationData;
         }
 
         public async Task<OutboxMessage> Get(string messageId, ContextBag options)
@@ -31,7 +34,7 @@
 
             if (result == null)
             {
-                return default(OutboxMessage);
+                return default;
             }
 
             if (result.Dispatched || result.TransportOperations.Length == 0)
@@ -57,12 +60,11 @@
 
             session.Advanced.UseOptimisticConcurrency = true;
 
-            context.Set(session);
             var transaction = new RavenDBOutboxTransaction(session);
             return Task.FromResult<OutboxTransaction>(transaction);
         }
 
-        public Task Store(OutboxMessage message, OutboxTransaction transaction, ContextBag context)
+        public async Task Store(OutboxMessage message, OutboxTransaction transaction, ContextBag context)
         {
             var session = ((RavenDBOutboxTransaction)transaction).AsyncSession;
 
@@ -81,29 +83,51 @@
                 index++;
             }
 
-            return session.StoreAsync(new OutboxRecord
+            var outboxRecord = new OutboxRecord
             {
                 MessageId = message.MessageId,
                 Dispatched = false,
                 TransportOperations = operations
-            }, GetOutboxRecordId(message.MessageId));
+            };
+
+            await session.StoreAsync(outboxRecord, GetOutboxRecordId(message.MessageId)).ConfigureAwait(false);
+            session.StoreSchemaVersionInMetadata(outboxRecord);
         }
 
         public async Task SetAsDispatched(string messageId, ContextBag options)
         {
             using (var session = GetSession(options))
             {
-                session.Advanced.UseOptimisticConcurrency = true;
-
-                var outboxMessage = await session.LoadAsync<OutboxRecord>(GetOutboxRecordId(messageId)).ConfigureAwait(false);
-                if (outboxMessage == null || outboxMessage.Dispatched)
-                {
-                    return;
-                }
-
-                outboxMessage.Dispatched = true;
-                outboxMessage.DispatchedAt = DateTime.UtcNow;
-                outboxMessage.TransportOperations = emptyOutboxOperations;
+                // to avoid loading the whole document we directly patch the document atomically
+                session.Advanced.Defer(new PatchCommandData(
+                    id: GetOutboxRecordId(messageId),
+                    changeVector: null,
+                    patch: new PatchRequest
+                    {
+                        Script =
+$@"if(this.Dispatched === true)
+  return;
+this.Dispatched = true
+this.DispatchedAt = args.DispatchedAt.Now
+this.TransportOperations = []
+this['@metadata']['{SchemaVersionExtensions.OutboxRecordSchemaVersionMetadataKey}'] = args.SchemaVersion.Version
+if(args.Expire.Should === false)
+  return;
+this['@metadata']['{Constants.Documents.Metadata.Expires}'] = args.Expire.At",
+                        Values =
+                        {
+                            {
+                                "DispatchedAt", new { Now = DateTime.UtcNow }
+                            },
+                            {
+                                "SchemaVersion", new { Version = OutboxRecord.SchemaVersion }
+                            },
+                            {
+                                "Expire", new { Should = timeToKeepDeduplicationData != Timeout.InfiniteTimeSpan, At = DateTime.UtcNow.Add(timeToKeepDeduplicationData) }
+                            }
+                        }
+                    },
+                    patchIfMissing: null));
 
                 await session.SaveChangesAsync().ConfigureAwait(false);
             }
@@ -111,21 +135,16 @@
 
         IAsyncDocumentSession GetSession(ContextBag context)
         {
-            IncomingMessage message;
-            if (context.TryGet(out message))
-            {
-                return sessionCreator.OpenSession(message.Headers);
-            }
+            var message = context.Get<IncomingMessage>();
 
-            return documentStore.OpenAsyncSession();
+            return sessionCreator.OpenSession(message.Headers);
         }
 
         string GetOutboxRecordId(string messageId) => $"Outbox/{endpointName}/{messageId.Replace('\\', '_')}";
 
         string endpointName;
-        IDocumentStore documentStore;
         TransportOperation[] emptyTransportOperations = new TransportOperation[0];
-        OutboxRecord.OutboxOperation[] emptyOutboxOperations = new OutboxRecord.OutboxOperation[0];
-        IOpenRavenSessionsInPipeline sessionCreator;
+        IOpenTenantAwareRavenSessions sessionCreator;
+        TimeSpan timeToKeepDeduplicationData;
     }
 }

@@ -3,7 +3,9 @@
     using System;
     using System.Collections.Generic;
     using System.Threading.Tasks;
+    using NServiceBus.Extensibility;
     using NServiceBus.Persistence.RavenDB;
+    using NServiceBus.Transport;
     using NUnit.Framework;
     using Raven.Client.Documents;
     using Raven.Client.Documents.Session;
@@ -17,7 +19,7 @@
             var docStore = db.NewStore();
             CustomizeDocumentStore(docStore);
             docStore.Initialize();
-            this.store = docStore;
+            store = docStore;
         }
 
         protected virtual void CustomizeDocumentStore(IDocumentStore docStore)
@@ -27,18 +29,8 @@
         [TearDown]
         public virtual void TearDown()
         {
-            sessions.ForEach(s => s.Dispose());
-            sessions.Clear();
             store.Dispose();
             db.Dispose();
-        }
-
-        protected internal IAsyncDocumentSession OpenAsyncSession()
-        {
-            var documentSession = store.OpenAsyncSession();
-            documentSession.Advanced.UseOptimisticConcurrency = true;
-            sessions.Add(documentSession);
-            return documentSession;
         }
 
         protected void WaitForIndexing()
@@ -59,7 +51,7 @@
             try
             {
                 await action();
-                return default(TException);
+                return default;
             }
             catch (TException ex)
             {
@@ -67,16 +59,30 @@
             }
         }
 
-        List<IAsyncDocumentSession> sessions = new List<IAsyncDocumentSession>();
+        protected IncomingMessage SimulateIncomingMessage(ContextBag context, string messageId = null)
+        {
+#pragma warning disable IDE0079 // Remove unnecessary suppression
+#pragma warning disable IDE0054 // False positive
+            messageId = messageId ?? Guid.NewGuid().ToString("N");
+#pragma warning restore IDE0054 // False positive
+#pragma warning restore IDE0079 // Remove unnecessary suppression
+
+            var incomingMessage = new IncomingMessage(messageId, new Dictionary<string, string>(), new byte[0]);
+
+            context.Set(incomingMessage);
+
+            return incomingMessage;
+        }
+
         protected IDocumentStore store;
         ReusableDB db;
 
-        internal IOpenRavenSessionsInPipeline CreateTestSessionOpener()
+        internal IOpenTenantAwareRavenSessions CreateTestSessionOpener()
         {
-            return new TestOpenSessionsInPipeline(this.store);
+            return new TestOpenSessionsInPipeline(store);
         }
 
-        class TestOpenSessionsInPipeline : IOpenRavenSessionsInPipeline
+        class TestOpenSessionsInPipeline : IOpenTenantAwareRavenSessions
         {
             IDocumentStore store;
 
